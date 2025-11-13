@@ -247,10 +247,16 @@ func (m *Modem) SendSMS(number, text string) error {
 		number = "1" + number
 	}
 
-	// Create SMS using separate arguments to avoid shell escaping issues
+	// Escape special characters in text for mmcli
+	text = strings.ReplaceAll(text, "\\", "\\\\")
+	text = strings.ReplaceAll(text, "'", "\\'")
+	text = strings.ReplaceAll(text, ",", "\\,")
+
+	// Create SMS with proper quoting
+	createArg := fmt.Sprintf("text='%s',number='%s'", text, number)
+
 	cmd := exec.Command("mmcli", "-m", strconv.Itoa(m.id),
-		"--messaging-create-sms",
-		fmt.Sprintf("text=%s,number=%s", text, number))
+		"--messaging-create-sms", createArg)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("failed to create SMS: %w (output: %s)", err, string(output))
