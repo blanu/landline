@@ -235,13 +235,22 @@ func (m *Modem) GetMessages() []SMS {
 }
 
 func (m *Modem) SendSMS(number, text string) error {
-	// Escape single quotes in text
-	text = strings.ReplaceAll(text, "'", "'\\''")
+	// Normalize number - remove + and spaces
+	number = strings.ReplaceAll(number, "+", "")
+	number = strings.ReplaceAll(number, " ", "")
+	number = strings.ReplaceAll(number, "-", "")
+	number = strings.ReplaceAll(number, "(", "")
+	number = strings.ReplaceAll(number, ")", "")
 
-	createCmd := fmt.Sprintf("text='%s',number='%s'", text, number)
+	// For US numbers, ensure we have country code
+	if len(number) == 10 {
+		number = "1" + number
+	}
 
+	// Create SMS using separate arguments to avoid shell escaping issues
 	cmd := exec.Command("mmcli", "-m", strconv.Itoa(m.id),
-		"--messaging-create-sms", createCmd)
+		"--messaging-create-sms",
+		fmt.Sprintf("text=%s,number=%s", text, number))
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("failed to create SMS: %w (output: %s)", err, string(output))
