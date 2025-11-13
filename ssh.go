@@ -18,6 +18,7 @@ import (
 	"github.com/charmbracelet/wish/activeterm"
 	"github.com/charmbracelet/wish/bubbletea"
 	"github.com/charmbracelet/wish/logging"
+	gossh "golang.org/x/crypto/ssh"
 )
 
 var (
@@ -68,6 +69,7 @@ func NewSSHServer(port int, hostKeyPath string, modem *Modem) (*SSHServer, error
 	s, err := wish.NewServer(
 		wish.WithAddress(fmt.Sprintf(":%d", port)),
 		wish.WithHostKeyPath(hostKeyPath),
+		wish.WithPublicKeyAuth(publicKeyHandler),
 		wish.WithMiddleware(
 			bubbletea.Middleware(func(s ssh.Session) (tea.Model, []tea.ProgramOption) {
 				pty, _, active := s.Pty()
@@ -90,6 +92,37 @@ func NewSSHServer(port int, hostKeyPath string, modem *Modem) (*SSHServer, error
 		server: s,
 		modem:  modem,
 	}, nil
+}
+
+func publicKeyHandler(ctx ssh.Context, key ssh.PublicKey) bool {
+	// Load authorized_keys
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return false
+	}
+
+	authKeysPath := filepath.Join(home, ".ssh", "authorized_keys")
+	data, err := os.ReadFile(authKeysPath)
+	if err != nil {
+		return false
+	}
+
+	// Parse authorized keys
+	for len(data) > 0 {
+		pubKey, _, _, rest, err := gossh.ParseAuthorizedKey(data)
+		if err != nil {
+			break
+		}
+
+		// Compare key fingerprints
+		if string(key.Marshal()) == string(pubKey.Marshal()) {
+			return true
+		}
+
+		data = rest
+	}
+
+	return false
 }
 
 func (s *SSHServer) Start() error {
@@ -169,7 +202,7 @@ func initialModel(modem *Modem, width, height int) model {
 		BorderForeground(mauve)
 
 	l := list.New(items, delegate, width, height-4)
-	l.Title = "📱 Landline SMS"
+	l.Title = "☎ landline sms"
 	l.Styles.Title = lipgloss.NewStyle().
 		Foreground(pink).
 		Bold(true).
@@ -354,7 +387,7 @@ func (m model) viewMessage() string {
 
 	content := lipgloss.JoinVertical(
 		lipgloss.Left,
-		titleStyle.Render("📱 Message"),
+		titleStyle.Render("☎ message"),
 		contentStyle.Render(m.msgView),
 		helpStyle.Render(" esc: back "),
 	)
@@ -395,12 +428,12 @@ func (m model) viewCompose() string {
 
 	content := lipgloss.JoinVertical(
 		lipgloss.Left,
-		titleStyle.Render("✉️  New Message"),
+		titleStyle.Render("✉️  new message"),
 		"",
-		labelStyle.Render("  To:"),
+		labelStyle.Render("  to:"),
 		"  "+m.numberInput.View(),
 		"",
-		labelStyle.Render("  Message:"),
+		labelStyle.Render("  message:"),
 		"  "+m.textInput.View(),
 		"",
 		errMsg,
@@ -421,6 +454,9 @@ func (m model) formatMessage(sms SMS) string {
 		Foreground(blue).
 		Bold(true)
 
+	numberStyle := lipgloss.NewStyle().
+		Foreground(text)
+
 	timeStyle := lipgloss.NewStyle().
 		Foreground(subtext0)
 
@@ -430,7 +466,7 @@ func (m model) formatMessage(sms SMS) string {
 
 	return lipgloss.JoinVertical(
 		lipgloss.Left,
-		fromStyle.Render("From: ")+sms.Number,
+		fromStyle.Render("from: ")+numberStyle.Render(sms.Number),
 		timeStyle.Render(sms.Timestamp.Format("Jan 02, 2006 15:04")),
 		"",
 		textStyle.Render(sms.Text),
