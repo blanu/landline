@@ -20,13 +20,13 @@ type SMS struct {
 }
 
 type Modem struct {
-	id           int
-	apn          string
-	messages     []SMS
-	msgMutex     sync.RWMutex
-	subscribers  []chan SMS
-	subMutex     sync.RWMutex
-	stopMonitor  chan bool
+	id          int
+	apn         string
+	messages    []SMS
+	msgMutex    sync.RWMutex
+	subscribers []chan SMS
+	subMutex    sync.RWMutex
+	stopMonitor chan bool
 }
 
 func NewModem(id int, apn string) (*Modem, error) {
@@ -64,7 +64,7 @@ func (m *Modem) Connect() error {
 
 func (m *Modem) Disconnect() error {
 	close(m.stopMonitor)
-	
+
 	cmd := exec.Command("mmcli", "-m", strconv.Itoa(m.id), "--simple-disconnect")
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to disconnect: %w", err)
@@ -99,7 +99,7 @@ func (m *Modem) loadMessages() {
 	}
 
 	smsIDs := m.parseSMSList(string(output))
-	
+
 	m.msgMutex.Lock()
 	defer m.msgMutex.Unlock()
 
@@ -120,7 +120,7 @@ func (m *Modem) checkNewMessages() {
 	}
 
 	smsIDs := m.parseSMSList(string(output))
-	
+
 	for _, id := range smsIDs {
 		m.msgMutex.RLock()
 		hasMsg := m.hasMessageID(id)
@@ -142,7 +142,7 @@ func (m *Modem) checkNewMessages() {
 func (m *Modem) parseSMSList(output string) []int {
 	re := regexp.MustCompile(`/SMS/(\d+)`)
 	matches := re.FindAllStringSubmatch(output, -1)
-	
+
 	ids := make([]int, 0)
 	for _, match := range matches {
 		if len(match) > 1 {
@@ -151,7 +151,7 @@ func (m *Modem) parseSMSList(output string) []int {
 			}
 		}
 	}
-	
+
 	return ids
 }
 
@@ -170,7 +170,7 @@ func (m *Modem) getSMS(id int) (SMS, error) {
 	lines := strings.Split(string(output), "\n")
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
-		
+
 		if strings.HasPrefix(line, "number:") {
 			sms.Number = strings.TrimSpace(strings.TrimPrefix(line, "number:"))
 		} else if strings.HasPrefix(line, "text:") {
@@ -195,7 +195,7 @@ func (m *Modem) hasMessageID(id int) bool {
 func (m *Modem) GetMessages() []SMS {
 	m.msgMutex.RLock()
 	defer m.msgMutex.RUnlock()
-	
+
 	// Return a copy
 	msgs := make([]SMS, len(m.messages))
 	copy(msgs, m.messages)
@@ -203,39 +203,42 @@ func (m *Modem) GetMessages() []SMS {
 }
 
 func (m *Modem) SendSMS(number, text string) error {
-	createCmd := fmt.Sprintf("text='%s',number='%s'", 
-		strings.ReplaceAll(text, "'", "\\'"),
-		number)
-	
-	cmd := exec.Command("mmcli", "-m", strconv.Itoa(m.id), 
+	// Escape single quotes in text
+	text = strings.ReplaceAll(text, "'", "'\\''")
+
+	createCmd := fmt.Sprintf("text='%s',number='%s'", text, number)
+
+	cmd := exec.Command("mmcli", "-m", strconv.Itoa(m.id),
 		"--messaging-create-sms", createCmd)
-	output, err := cmd.Output()
+	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("failed to create SMS: %w", err)
+		return fmt.Errorf("failed to create SMS: %w (output: %s)", err, string(output))
 	}
 
 	// Parse SMS ID from output
 	re := regexp.MustCompile(`/SMS/(\d+)`)
 	matches := re.FindStringSubmatch(string(output))
 	if len(matches) < 2 {
-		return fmt.Errorf("failed to parse SMS ID from output")
+		return fmt.Errorf("failed to parse SMS ID from output: %s", string(output))
 	}
 
 	smsID := matches[1]
 
 	// Send the SMS
 	cmd = exec.Command("mmcli", "-s", smsID, "--send")
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to send SMS: %w", err)
+	output, err = cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to send SMS %s: %w (output: %s)", smsID, err, string(output))
 	}
 
+	log.Printf("SMS sent successfully to %s (ID: %s)", number, smsID)
 	return nil
 }
 
 func (m *Modem) Subscribe() chan SMS {
 	m.subMutex.Lock()
 	defer m.subMutex.Unlock()
-	
+
 	ch := make(chan SMS, 10)
 	m.subscribers = append(m.subscribers, ch)
 	return ch
@@ -244,7 +247,7 @@ func (m *Modem) Subscribe() chan SMS {
 func (m *Modem) Unsubscribe(ch chan SMS) {
 	m.subMutex.Lock()
 	defer m.subMutex.Unlock()
-	
+
 	for i, sub := range m.subscribers {
 		if sub == ch {
 			m.subscribers = append(m.subscribers[:i], m.subscribers[i+1:]...)
@@ -257,7 +260,7 @@ func (m *Modem) Unsubscribe(ch chan SMS) {
 func (m *Modem) notifySubscribers(sms SMS) {
 	m.subMutex.RLock()
 	defer m.subMutex.RUnlock()
-	
+
 	for _, ch := range m.subscribers {
 		select {
 		case ch <- sms:

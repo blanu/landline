@@ -95,23 +95,31 @@ func NewSSHServer(port int, hostKeyPath string, modem *Modem) (*SSHServer, error
 }
 
 func publicKeyHandler(ctx ssh.Context, key ssh.PublicKey) bool {
-	// Load authorized_keys
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return false
-	}
+	// Get the actual user's home, not root's
+	user := ctx.User()
 
-	authKeysPath := filepath.Join(home, ".ssh", "authorized_keys")
+	// Try to load from the connecting user's home
+	authKeysPath := filepath.Join("/home", user, ".ssh", "authorized_keys")
 	data, err := os.ReadFile(authKeysPath)
 	if err != nil {
-		return false
+		// Fallback to root's authorized_keys if running as root
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return false
+		}
+		authKeysPath = filepath.Join(home, ".ssh", "authorized_keys")
+		data, err = os.ReadFile(authKeysPath)
+		if err != nil {
+			return false
+		}
 	}
 
 	// Parse authorized keys
 	for len(data) > 0 {
 		pubKey, _, _, rest, err := gossh.ParseAuthorizedKey(data)
 		if err != nil {
-			break
+			data = rest
+			continue
 		}
 
 		// Compare key fingerprints
@@ -155,6 +163,10 @@ func (i smsItem) Description() string {
 	preview := i.sms.Text
 	if len(preview) > 50 {
 		preview = preview[:47] + "..."
+	}
+	// Ensure it's not empty string
+	if preview == "" {
+		preview = "(empty message)"
 	}
 	return preview
 }
@@ -217,6 +229,8 @@ func initialModel(modem *Modem, width, height int) model {
 	ni.Focus()
 	ni.CharLimit = 20
 	ni.Width = 30
+	ni.PromptStyle = lipgloss.NewStyle().Foreground(blue)
+	ni.TextStyle = lipgloss.NewStyle().Foreground(text)
 
 	// Create text area
 	ti := textarea.New()
@@ -224,6 +238,8 @@ func initialModel(modem *Modem, width, height int) model {
 	ti.CharLimit = 160
 	ti.SetWidth(width - 4)
 	ti.SetHeight(5)
+	ti.FocusedStyle.CursorLine = lipgloss.NewStyle()
+	ti.ShowLineNumbers = false
 
 	// Subscribe to new messages
 	smsChan := modem.Subscribe()
@@ -295,6 +311,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.mode = viewList
 				m.numberInput.SetValue("")
 				m.textInput.SetValue("")
+				m.numberInput.Focus()
 				return m, nil
 			case "ctrl+s":
 				// Send SMS
@@ -307,10 +324,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.mode = viewList
 						m.numberInput.SetValue("")
 						m.textInput.SetValue("")
+						m.err = nil
 					}
 				}
 				return m, nil
-			case "tab":
+			case "tab", "shift+tab":
 				if m.numberInput.Focused() {
 					m.numberInput.Blur()
 					m.textInput.Focus()
@@ -333,9 +351,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.numberInput.Focused() {
 			m.numberInput, cmd = m.numberInput.Update(msg)
 			cmds = append(cmds, cmd)
+		} else if m.textInput.Focused() {
+			m.textInput, cmd = m.textInput.Update(msg)
+			cmds = append(cmds, cmd)
 		}
-		m.textInput, cmd = m.textInput.Update(msg)
-		cmds = append(cmds, cmd)
 	}
 
 	return m, tea.Batch(cmds...)
@@ -451,24 +470,32 @@ func (m model) viewCompose() string {
 
 func (m model) formatMessage(sms SMS) string {
 	fromStyle := lipgloss.NewStyle().
-		Foreground(blue).
+		Foreground(lavender).
 		Bold(true)
 
 	numberStyle := lipgloss.NewStyle().
-		Foreground(text)
+		Foreground(blue).
+		Bold(true)
 
 	timeStyle := lipgloss.NewStyle().
-		Foreground(subtext0)
+		Foreground(overlay2)
 
 	textStyle := lipgloss.NewStyle().
 		Foreground(text).
+		Bold(false).
 		Padding(1, 0)
+
+	// Debug: ensure text isn't empty
+	messageText := sms.Text
+	if messageText == "" {
+		messageText = "(no message text)"
+	}
 
 	return lipgloss.JoinVertical(
 		lipgloss.Left,
 		fromStyle.Render("from: ")+numberStyle.Render(sms.Number),
 		timeStyle.Render(sms.Timestamp.Format("Jan 02, 2006 15:04")),
 		"",
-		textStyle.Render(sms.Text),
+		textStyle.Render(messageText),
 	)
 }
