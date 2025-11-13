@@ -48,15 +48,25 @@ func NewModem(id int, apn string) (*Modem, error) {
 func (m *Modem) Connect() error {
 	// Enable modem
 	cmd := exec.Command("mmcli", "-m", strconv.Itoa(m.id), "-e")
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to enable modem: %w", err)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		// Check if already enabled
+		if !strings.Contains(string(output), "already") {
+			return fmt.Errorf("failed to enable modem: %w (output: %s)", err, string(output))
+		}
 	}
 
 	// Connect with APN
 	connectStr := fmt.Sprintf("apn=%s,ip-type=ipv4", m.apn)
 	cmd = exec.Command("mmcli", "-m", strconv.Itoa(m.id), "--simple-connect", connectStr)
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to connect: %w", err)
+	output, err = cmd.CombinedOutput()
+	if err != nil {
+		// Check if already connected
+		if strings.Contains(string(output), "already") || strings.Contains(string(output), "connected") {
+			log.Printf("Modem already connected, continuing...")
+			return nil
+		}
+		return fmt.Errorf("failed to connect: %w (output: %s)", err, string(output))
 	}
 
 	return nil
@@ -169,16 +179,38 @@ func (m *Modem) getSMS(id int) (SMS, error) {
 
 	lines := strings.Split(string(output), "\n")
 	for _, line := range lines {
-		line = strings.TrimSpace(line)
+		// Skip separator lines and section headers
+		if strings.Contains(line, "---") || strings.Contains(line, "General") ||
+			strings.Contains(line, "Content") || strings.Contains(line, "Properties") {
+			continue
+		}
 
-		if strings.HasPrefix(line, "number:") {
-			sms.Number = strings.TrimSpace(strings.TrimPrefix(line, "number:"))
-		} else if strings.HasPrefix(line, "text:") {
-			sms.Text = strings.TrimSpace(strings.TrimPrefix(line, "text:"))
-		} else if strings.HasPrefix(line, "state:") {
-			sms.State = strings.TrimSpace(strings.TrimPrefix(line, "state:"))
+		// Look for "field: value" pattern with potential leading pipes
+		if strings.Contains(line, ":") {
+			// Remove leading pipes and whitespace
+			line = strings.TrimLeft(line, "| ")
+
+			parts := strings.SplitN(line, ":", 2)
+			if len(parts) != 2 {
+				continue
+			}
+
+			field := strings.TrimSpace(parts[0])
+			value := strings.TrimSpace(parts[1])
+
+			switch field {
+			case "number":
+				sms.Number = value
+			case "text":
+				sms.Text = value
+			case "state":
+				sms.State = value
+			}
 		}
 	}
+
+	// Debug log
+	log.Printf("Parsed SMS %d: Number=%q, Text=%q, State=%q", id, sms.Number, sms.Text, sms.State)
 
 	return sms, nil
 }
