@@ -207,21 +207,26 @@ func initialModel(modem *Modem, width, height int) model {
 
 	delegate := list.NewDefaultDelegate()
 	delegate.Styles.SelectedTitle = delegate.Styles.SelectedTitle.
-		Foreground(mauve).
-		BorderForeground(mauve)
+		Foreground(sky).
+		BorderForeground(blue).
+		Bold(true)
 	delegate.Styles.SelectedDesc = delegate.Styles.SelectedDesc.
-		Foreground(subtext1).
-		BorderForeground(mauve)
+		Foreground(lavender).
+		BorderForeground(blue)
+	delegate.Styles.NormalTitle = delegate.Styles.NormalTitle.
+		Foreground(blue)
+	delegate.Styles.NormalDesc = delegate.Styles.NormalDesc.
+		Foreground(subtext1)
 
 	l := list.New(items, delegate, width, height-4)
 	l.Title = "☎ landline sms"
 	l.Styles.Title = lipgloss.NewStyle().
-		Foreground(pink).
+		Foreground(sky).
 		Bold(true).
 		Padding(0, 1)
 	l.Styles.TitleBar = lipgloss.NewStyle().
 		Background(surface0).
-		Foreground(text)
+		Foreground(blue)
 
 	// Create number input
 	ni := textinput.New()
@@ -390,7 +395,7 @@ func (m model) viewList() string {
 
 func (m model) viewMessage() string {
 	titleStyle := lipgloss.NewStyle().
-		Foreground(pink).
+		Foreground(sky).
 		Bold(true).
 		Padding(1, 2).
 		Background(surface0)
@@ -422,13 +427,13 @@ func (m model) viewMessage() string {
 
 func (m model) viewCompose() string {
 	titleStyle := lipgloss.NewStyle().
-		Foreground(green).
+		Foreground(teal).
 		Bold(true).
 		Padding(1, 2).
 		Background(surface0)
 
 	labelStyle := lipgloss.NewStyle().
-		Foreground(blue).
+		Foreground(sky).
 		Bold(true)
 
 	helpStyle := lipgloss.NewStyle().
